@@ -11,6 +11,16 @@ stocks_data = None
 companies_data = None
 index_data = None
 
+# Load data when the app starts (for production deployment)
+print("🚀 Starting S&P 500 Price Dip Analysis App...")
+data_loaded = load_and_process_data()
+
+if not data_loaded:
+    print("❌ CRITICAL ERROR: Failed to load data. App will not function properly.")
+    print("Please check that all data files are present in the 'data/' directory.")
+else:
+    print("✅ App started successfully with data loaded!")
+
 def load_and_process_data():
     """Load and process the S&P 500 data"""
     global stocks_data, companies_data, index_data
@@ -745,14 +755,7 @@ def api_stats():
         })
 
 if __name__ == '__main__':
-    # Load data when starting the app
-    print("Starting S&P 500 Price Dip Analysis App...")
-    data_loaded = load_and_process_data()
-    
-    if not data_loaded:
-        print("CRITICAL ERROR: Failed to load data. App will not function properly.")
-        print("Please check that all data files are present in the 'data/' directory.")
-    
+    # For local development
     port = int(os.environ.get('PORT', 8080))
     print(f"Starting Flask app on port {port}")
     app.run(debug=False, host='0.0.0.0', port=port)
