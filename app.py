@@ -1,15 +1,131 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, session
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 import os
+import json
+import uuid
+from collections import defaultdict, Counter
 
 app = Flask(__name__)
+app.secret_key = 'sp500_admin_secret_key_2024'  # Change this in production
 
 # Global variables to store processed data
 stocks_data = None
 companies_data = None
 index_data = None
+
+# Analytics tracking
+user_analytics = {
+    'sessions': {},  # session_id -> session_data
+    'page_views': defaultdict(int),  # page -> count
+    'api_calls': defaultdict(int),  # endpoint -> count
+    'user_actions': [],  # list of all user actions
+    'daily_stats': defaultdict(lambda: {
+        'unique_users': set(),
+        'page_views': 0,
+        'api_calls': 0,
+        'actions': []
+    })
+}
+
+def track_user_action(action_type, details=None, endpoint=None):
+    """Track user actions for analytics"""
+    global user_analytics
+    
+    # Get or create session
+    if 'session_id' not in session:
+        session['session_id'] = str(uuid.uuid4())
+        session['first_visit'] = datetime.now().isoformat()
+        session['user_agent'] = request.headers.get('User-Agent', 'Unknown')
+        session['ip_address'] = request.remote_addr
+    
+    session_id = session['session_id']
+    current_time = datetime.now()
+    today = current_time.strftime('%Y-%m-%d')
+    
+    # Initialize session data if not exists
+    if session_id not in user_analytics['sessions']:
+        user_analytics['sessions'][session_id] = {
+            'first_visit': session.get('first_visit'),
+            'last_activity': current_time.isoformat(),
+            'user_agent': session.get('user_agent'),
+            'ip_address': session.get('ip_address'),
+            'actions': [],
+            'page_views': 0,
+            'api_calls': 0
+        }
+    
+    # Update session data
+    user_analytics['sessions'][session_id]['last_activity'] = current_time.isoformat()
+    
+    # Track action
+    action_data = {
+        'timestamp': current_time.isoformat(),
+        'action_type': action_type,
+        'details': details or {},
+        'endpoint': endpoint,
+        'session_id': session_id
+    }
+    
+    user_analytics['user_actions'].append(action_data)
+    user_analytics['sessions'][session_id]['actions'].append(action_data)
+    user_analytics['daily_stats'][today]['actions'].append(action_data)
+    user_analytics['daily_stats'][today]['unique_users'].add(session_id)
+    
+    # Update counters
+    if action_type == 'page_view':
+        user_analytics['page_views'][details.get('page', 'unknown')] += 1
+        user_analytics['sessions'][session_id]['page_views'] += 1
+        user_analytics['daily_stats'][today]['page_views'] += 1
+    elif action_type == 'api_call':
+        user_analytics['api_calls'][endpoint] += 1
+        user_analytics['sessions'][session_id]['api_calls'] += 1
+        user_analytics['daily_stats'][today]['api_calls'] += 1
+
+def get_analytics_summary():
+    """Get analytics summary for admin dashboard"""
+    global user_analytics
+    
+    # Calculate summary statistics
+    total_sessions = len(user_analytics['sessions'])
+    total_actions = len(user_analytics['user_actions'])
+    total_page_views = sum(user_analytics['page_views'].values())
+    total_api_calls = sum(user_analytics['api_calls'].values())
+    
+    # Recent activity (last 24 hours)
+    recent_cutoff = datetime.now() - timedelta(hours=24)
+    recent_actions = [
+        action for action in user_analytics['user_actions']
+        if datetime.fromisoformat(action['timestamp']) > recent_cutoff
+    ]
+    
+    # Top pages and API endpoints
+    top_pages = dict(Counter(user_analytics['page_views']).most_common(10))
+    top_api_endpoints = dict(Counter(user_analytics['api_calls']).most_common(10))
+    
+    # Daily stats (last 7 days)
+    daily_stats = {}
+    for i in range(7):
+        date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+        if date in user_analytics['daily_stats']:
+            daily_stats[date] = {
+                'unique_users': len(user_analytics['daily_stats'][date]['unique_users']),
+                'page_views': user_analytics['daily_stats'][date]['page_views'],
+                'api_calls': user_analytics['daily_stats'][date]['api_calls']
+            }
+    
+    return {
+        'total_sessions': total_sessions,
+        'total_actions': total_actions,
+        'total_page_views': total_page_views,
+        'total_api_calls': total_api_calls,
+        'recent_actions_count': len(recent_actions),
+        'top_pages': top_pages,
+        'top_api_endpoints': top_api_endpoints,
+        'daily_stats': daily_stats,
+        'recent_actions': recent_actions[-20:]  # Last 20 actions
+    }
 
 def load_and_process_data():
     """Load and process the S&P 500 data"""
@@ -117,10 +233,8 @@ def load_and_process_data():
             else:
                 print(f"   ⚠️  Chunk {chunk_count} had no valid records after filtering")
             
-            # Limit memory usage by processing only first few chunks on free tier
-            if chunk_count >= 20:  # Limit to first 20 chunks (1M records)
-                print(f"   🛑 Limiting data to first {chunk_count} chunks for free tier compatibility")
-                break
+            # Process all available data (removed artificial limit)
+            # Note: This will process the full dataset for complete analysis
         
         print(f"\n   📈 CHUNK PROCESSING SUMMARY:")
         print(f"   📊 Total chunks processed: {chunk_count}")
@@ -450,6 +564,7 @@ def calculate_recovery_statistics(threshold=-20, start_date=None, end_date=None,
 @app.route('/')
 def index():
     """Main page"""
+    track_user_action('page_view', {'page': 'main_dashboard'})
     return render_template('index.html')
 
 @app.route('/test')
@@ -514,11 +629,13 @@ def health():
 @app.route('/stock_history')
 def stock_history():
     """Stock history page"""
+    track_user_action('page_view', {'page': 'stock_history'})
     return render_template('stock_history.html')
 
 @app.route('/api/significant_declines')
 def api_significant_declines():
     """API endpoint to get combined decline and recovery data"""
+    track_user_action('api_call', {'endpoint': '/api/significant_declines'}, '/api/significant_declines')
     try:
         # Get parameters
         threshold = float(request.args.get('threshold', -20))
@@ -568,6 +685,7 @@ def api_significant_declines():
 
 @app.route('/api/stocks')
 def api_stocks():
+    track_user_action('api_call', {'endpoint': '/api/stocks'}, '/api/stocks')
     """API endpoint to get all available stocks"""
     try:
         global stocks_data, companies_data
@@ -611,6 +729,7 @@ def api_stocks():
 
 @app.route('/api/stock_history')
 def api_stock_history():
+    track_user_action('api_call', {'endpoint': '/api/stock_history'}, '/api/stock_history')
     """API endpoint to get stock price history"""
     try:
         global stocks_data
@@ -681,6 +800,7 @@ def api_stock_history():
 @app.route('/api/recovery_stats')
 def api_recovery_stats():
     """API endpoint to get recovery statistics"""
+    track_user_action('api_call', {'endpoint': '/api/recovery_stats'}, '/api/recovery_stats')
     try:
         # Get parameters
         threshold = float(request.args.get('threshold', -20))
@@ -709,6 +829,7 @@ def api_recovery_stats():
 @app.route('/api/stats')
 def api_stats():
     """API endpoint to get statistics"""
+    track_user_action('api_call', {'endpoint': '/api/stats'}, '/api/stats')
     try:
         global stocks_data
         
@@ -757,6 +878,83 @@ def api_stats():
             }
         })
         
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+# Admin Dashboard Routes
+@app.route('/admin')
+def admin_dashboard():
+    """Admin dashboard page - accessible to all users"""
+    track_user_action('page_view', {'page': 'admin_dashboard'})
+    return render_template('admin_dashboard.html')
+
+@app.route('/api/admin/analytics')
+def api_admin_analytics():
+    """API endpoint for admin analytics data"""
+    track_user_action('api_call', {'endpoint': '/api/admin/analytics'}, '/api/admin/analytics')
+    try:
+        analytics_data = get_analytics_summary()
+        return jsonify({
+            'success': True,
+            'data': analytics_data
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/admin/sessions')
+def api_admin_sessions():
+    """API endpoint to get detailed session data"""
+    track_user_action('api_call', {'endpoint': '/api/admin/sessions'}, '/api/admin/sessions')
+    try:
+        global user_analytics
+        
+        # Get session details
+        sessions_data = []
+        for session_id, session_info in user_analytics['sessions'].items():
+            sessions_data.append({
+                'session_id': session_id,
+                'first_visit': session_info['first_visit'],
+                'last_activity': session_info['last_activity'],
+                'user_agent': session_info['user_agent'],
+                'ip_address': session_info['ip_address'],
+                'page_views': session_info['page_views'],
+                'api_calls': session_info['api_calls'],
+                'total_actions': len(session_info['actions'])
+            })
+        
+        # Sort by last activity (most recent first)
+        sessions_data.sort(key=lambda x: x['last_activity'], reverse=True)
+        
+        return jsonify({
+            'success': True,
+            'sessions': sessions_data[:50]  # Limit to 50 most recent sessions
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+@app.route('/api/admin/actions')
+def api_admin_actions():
+    """API endpoint to get detailed user actions"""
+    track_user_action('api_call', {'endpoint': '/api/admin/actions'}, '/api/admin/actions')
+    try:
+        global user_analytics
+        
+        # Get recent actions with more details
+        recent_actions = user_analytics['user_actions'][-100:]  # Last 100 actions
+        
+        return jsonify({
+            'success': True,
+            'actions': recent_actions
+        })
     except Exception as e:
         return jsonify({
             'success': False,
