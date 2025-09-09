@@ -233,8 +233,11 @@ def load_and_process_data():
             else:
                 print(f"   ⚠️  Chunk {chunk_count} had no valid records after filtering")
             
-            # Process all available data (removed artificial limit)
-            # Note: This will process the full dataset for complete analysis
+            # Limit memory usage for free tier compatibility
+            # Use a reasonable limit that works on Render free tier
+            if chunk_count >= 25:  # Limit to first 25 chunks (1.25M records)
+                print(f"   🛑 Limiting data to first {chunk_count} chunks for free tier compatibility")
+                break
         
         print(f"\n   📈 CHUNK PROCESSING SUMMARY:")
         print(f"   📊 Total chunks processed: {chunk_count}")
