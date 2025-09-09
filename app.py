@@ -15,48 +15,76 @@ def load_and_process_data():
     """Load and process the S&P 500 data"""
     global stocks_data, companies_data, index_data
     
-    print("Loading data...")
-    
-    # Load companies data
-    companies_data = pd.read_csv('data/sp500_companies.csv')
-    
-    # Load index data
-    index_data = pd.read_csv('data/sp500_index.csv')
-    index_data['Date'] = pd.to_datetime(index_data['Date'])
-    
-    # Load stocks data in chunks to handle large file
-    print("Loading stocks data (this may take a moment)...")
-    chunks = []
-    chunk_size = 100000
-    
-    for chunk in pd.read_csv('data/sp500_stocks.csv', chunksize=chunk_size):
-        # Filter out rows with empty price data
-        chunk = chunk.dropna(subset=['Close'])
-        if not chunk.empty:
-            chunks.append(chunk)
-    
-    stocks_data = pd.concat(chunks, ignore_index=True)
-    stocks_data['Date'] = pd.to_datetime(stocks_data['Date'])
-    
-    # Calculate daily price changes based on previous day opening vs current day opening price
-    print("Calculating daily price changes...")
-    stocks_data = stocks_data.sort_values(['Symbol', 'Date'])
-    
-    # Calculate the price change from previous day opening to current day opening
-    stocks_data['Prev_Day_Open'] = stocks_data.groupby('Symbol')['Open'].shift(1)
-    stocks_data['Daily_Change_Pct'] = ((stocks_data['Open'] - stocks_data['Prev_Day_Open']) / stocks_data['Prev_Day_Open']) * 100
-    
-    # Also keep the intraday change for reference
-    stocks_data['Intraday_Change_Pct'] = ((stocks_data['Close'] - stocks_data['Open']) / stocks_data['Open']) * 100
-    
-    # Merge with company names
-    stocks_data = stocks_data.merge(
-        companies_data[['Symbol', 'Shortname']], 
-        on='Symbol', 
-        how='left'
-    )
-    
-    print("Data processing complete!")
+    try:
+        print("Loading data...")
+        
+        # Check if data directory exists
+        import os
+        if not os.path.exists('data'):
+            print("ERROR: data directory not found!")
+            return False
+        
+        # Load companies data
+        print("Loading companies data...")
+        companies_data = pd.read_csv('data/sp500_companies.csv')
+        print(f"Loaded {len(companies_data)} companies")
+        
+        # Load index data
+        print("Loading index data...")
+        index_data = pd.read_csv('data/sp500_index.csv')
+        index_data['Date'] = pd.to_datetime(index_data['Date'])
+        print(f"Loaded {len(index_data)} index records")
+        
+        # Load stocks data in chunks to handle large file
+        print("Loading stocks data (this may take a moment)...")
+        chunks = []
+        chunk_size = 100000
+        
+        # Check if stocks file exists
+        if not os.path.exists('data/sp500_stocks.csv'):
+            print("ERROR: sp500_stocks.csv not found!")
+            return False
+        
+        for chunk in pd.read_csv('data/sp500_stocks.csv', chunksize=chunk_size):
+            # Filter out rows with empty price data - use Open instead of Close
+            chunk = chunk.dropna(subset=['Open'])
+            if not chunk.empty:
+                chunks.append(chunk)
+        
+        if not chunks:
+            print("ERROR: No valid stock data found!")
+            return False
+            
+        stocks_data = pd.concat(chunks, ignore_index=True)
+        stocks_data['Date'] = pd.to_datetime(stocks_data['Date'])
+        print(f"Loaded {len(stocks_data)} stock records")
+        
+        # Calculate daily price changes based on previous day opening vs current day opening price
+        print("Calculating daily price changes...")
+        stocks_data = stocks_data.sort_values(['Symbol', 'Date'])
+        
+        # Calculate the price change from previous day opening to current day opening
+        stocks_data['Prev_Day_Open'] = stocks_data.groupby('Symbol')['Open'].shift(1)
+        stocks_data['Daily_Change_Pct'] = ((stocks_data['Open'] - stocks_data['Prev_Day_Open']) / stocks_data['Prev_Day_Open']) * 100
+        
+        # Also keep the intraday change for reference
+        stocks_data['Intraday_Change_Pct'] = ((stocks_data['Close'] - stocks_data['Open']) / stocks_data['Open']) * 100
+        
+        # Merge with company names
+        stocks_data = stocks_data.merge(
+            companies_data[['Symbol', 'Shortname']], 
+            on='Symbol', 
+            how='left'
+        )
+        
+        print(f"Data processing complete! {stocks_data['Symbol'].nunique()} unique stocks loaded")
+        return True
+        
+    except Exception as e:
+        print(f"ERROR loading data: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 def get_significant_declines(threshold=-20, start_date=None, end_date=None, symbol=None):
     """Get stocks with significant daily declines"""
@@ -303,6 +331,37 @@ def calculate_recovery_statistics(threshold=-20, start_date=None, end_date=None,
 def index():
     """Main page"""
     return render_template('index.html')
+
+@app.route('/health')
+def health():
+    """Health check endpoint for debugging"""
+    global stocks_data, companies_data, index_data
+    
+    health_status = {
+        'status': 'healthy',
+        'data_loaded': {
+            'stocks_data': stocks_data is not None,
+            'companies_data': companies_data is not None,
+            'index_data': index_data is not None
+        },
+        'data_counts': {}
+    }
+    
+    if stocks_data is not None:
+        health_status['data_counts']['stocks_records'] = len(stocks_data)
+        health_status['data_counts']['unique_stocks'] = stocks_data['Symbol'].nunique()
+        health_status['data_counts']['date_range'] = {
+            'start': stocks_data['Date'].min().strftime('%Y-%m-%d'),
+            'end': stocks_data['Date'].max().strftime('%Y-%m-%d')
+        }
+    
+    if companies_data is not None:
+        health_status['data_counts']['companies'] = len(companies_data)
+    
+    if index_data is not None:
+        health_status['data_counts']['index_records'] = len(index_data)
+    
+    return jsonify(health_status)
 
 @app.route('/stock_history')
 def stock_history():
@@ -558,6 +617,13 @@ def api_stats():
 
 if __name__ == '__main__':
     # Load data when starting the app
-    load_and_process_data()
+    print("Starting S&P 500 Price Dip Analysis App...")
+    data_loaded = load_and_process_data()
+    
+    if not data_loaded:
+        print("CRITICAL ERROR: Failed to load data. App will not function properly.")
+        print("Please check that all data files are present in the 'data/' directory.")
+    
     port = int(os.environ.get('PORT', 8080))
+    print(f"Starting Flask app on port {port}")
     app.run(debug=False, host='0.0.0.0', port=port)
