@@ -16,74 +16,175 @@ def load_and_process_data():
     global stocks_data, companies_data, index_data
     
     try:
-        print("Loading data...")
+        import os
+        print("=" * 60)
+        print("STARTING DATA LOADING PROCESS")
+        print("=" * 60)
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Python version: {os.sys.version}")
         
         # Check if data directory exists
-        import os
+        print("\n1. CHECKING DATA DIRECTORY...")
         if not os.path.exists('data'):
-            print("ERROR: data directory not found!")
+            print("❌ ERROR: data directory not found!")
+            print(f"   Current directory contents: {os.listdir('.')}")
             return False
+        else:
+            print("✅ data directory found")
+            data_files = os.listdir('data')
+            print(f"   Files in data directory: {data_files}")
+            
+            # Check file sizes
+            for file in data_files:
+                file_path = os.path.join('data', file)
+                file_size = os.path.getsize(file_path)
+                file_size_mb = file_size / (1024 * 1024)
+                print(f"   📁 {file}: {file_size_mb:.2f} MB")
         
         # Load companies data
-        print("Loading companies data...")
-        companies_data = pd.read_csv('data/sp500_companies.csv')
-        print(f"Loaded {len(companies_data)} companies")
+        print("\n2. LOADING COMPANIES DATA...")
+        companies_file = 'data/sp500_companies.csv'
+        if not os.path.exists(companies_file):
+            print(f"❌ ERROR: {companies_file} not found!")
+            return False
+        
+        print(f"   📂 Loading from: {companies_file}")
+        companies_data = pd.read_csv(companies_file)
+        print(f"✅ SUCCESS: Loaded {len(companies_data)} companies")
+        print(f"   📊 Columns: {list(companies_data.columns)}")
+        print(f"   📅 Sample data: {companies_data.head(2).to_dict()}")
         
         # Load index data
-        print("Loading index data...")
-        index_data = pd.read_csv('data/sp500_index.csv')
+        print("\n3. LOADING INDEX DATA...")
+        index_file = 'data/sp500_index.csv'
+        if not os.path.exists(index_file):
+            print(f"❌ ERROR: {index_file} not found!")
+            return False
+        
+        print(f"   📂 Loading from: {index_file}")
+        index_data = pd.read_csv(index_file)
         index_data['Date'] = pd.to_datetime(index_data['Date'])
-        print(f"Loaded {len(index_data)} index records")
+        print(f"✅ SUCCESS: Loaded {len(index_data)} index records")
+        print(f"   📊 Columns: {list(index_data.columns)}")
+        print(f"   📅 Date range: {index_data['Date'].min()} to {index_data['Date'].max()}")
         
         # Load stocks data in chunks to handle large file
-        print("Loading stocks data (this may take a moment)...")
-        chunks = []
-        chunk_size = 100000
-        
-        # Check if stocks file exists
-        if not os.path.exists('data/sp500_stocks.csv'):
-            print("ERROR: sp500_stocks.csv not found!")
+        print("\n4. LOADING STOCKS DATA...")
+        stocks_file = 'data/sp500_stocks.csv'
+        if not os.path.exists(stocks_file):
+            print(f"❌ ERROR: {stocks_file} not found!")
             return False
         
-        for chunk in pd.read_csv('data/sp500_stocks.csv', chunksize=chunk_size):
+        # Get file size
+        file_size = os.path.getsize(stocks_file)
+        file_size_mb = file_size / (1024 * 1024)
+        print(f"   📂 Loading from: {stocks_file}")
+        print(f"   📏 File size: {file_size_mb:.2f} MB")
+        
+        chunks = []
+        chunk_size = 50000  # Reduced chunk size for better memory management
+        print(f"   🔄 Processing in chunks of {chunk_size:,} records...")
+        
+        print("   📊 Processing stock data in chunks...")
+        chunk_count = 0
+        total_records_processed = 0
+        valid_records = 0
+        
+        for chunk in pd.read_csv(stocks_file, chunksize=chunk_size):
+            chunk_count += 1
+            chunk_records = len(chunk)
+            total_records_processed += chunk_records
+            
+            print(f"   📦 Chunk {chunk_count}: {chunk_records:,} records (Total processed: {total_records_processed:,})")
+            
+            # Check chunk columns
+            if chunk_count == 1:
+                print(f"   📋 Columns found: {list(chunk.columns)}")
+                print(f"   🔍 Sample record: {chunk.iloc[0].to_dict()}")
+            
             # Filter out rows with empty price data - use Open instead of Close
+            chunk_before = len(chunk)
             chunk = chunk.dropna(subset=['Open'])
+            chunk_after = len(chunk)
+            valid_records += chunk_after
+            
+            if chunk_before != chunk_after:
+                print(f"   🧹 Filtered out {chunk_before - chunk_after:,} records with missing Open prices")
+            
             if not chunk.empty:
                 chunks.append(chunk)
+                print(f"   ✅ Added chunk with {len(chunk):,} valid records")
+            else:
+                print(f"   ⚠️  Chunk {chunk_count} had no valid records after filtering")
+            
+            # Limit memory usage by processing only first few chunks on free tier
+            if chunk_count >= 20:  # Limit to first 20 chunks (1M records)
+                print(f"   🛑 Limiting data to first {chunk_count} chunks for free tier compatibility")
+                break
+        
+        print(f"\n   📈 CHUNK PROCESSING SUMMARY:")
+        print(f"   📊 Total chunks processed: {chunk_count}")
+        print(f"   📊 Total records processed: {total_records_processed:,}")
+        print(f"   📊 Valid records found: {valid_records:,}")
+        print(f"   📊 Chunks with data: {len(chunks)}")
         
         if not chunks:
-            print("ERROR: No valid stock data found!")
+            print("❌ ERROR: No valid stock data found!")
             return False
             
+        print(f"\n   🔗 Concatenating {len(chunks)} chunks...")
         stocks_data = pd.concat(chunks, ignore_index=True)
         stocks_data['Date'] = pd.to_datetime(stocks_data['Date'])
-        print(f"Loaded {len(stocks_data)} stock records")
+        print(f"✅ SUCCESS: Loaded {len(stocks_data):,} stock records")
+        print(f"   📊 Final DataFrame shape: {stocks_data.shape}")
+        print(f"   📊 Columns: {list(stocks_data.columns)}")
+        print(f"   📅 Date range: {stocks_data['Date'].min()} to {stocks_data['Date'].max()}")
+        print(f"   🏢 Unique symbols: {stocks_data['Symbol'].nunique()}")
         
         # Calculate daily price changes based on previous day opening vs current day opening price
-        print("Calculating daily price changes...")
+        print("\n5. CALCULATING DAILY PRICE CHANGES...")
+        print("   🔄 Sorting data by Symbol and Date...")
         stocks_data = stocks_data.sort_values(['Symbol', 'Date'])
         
-        # Calculate the price change from previous day opening to current day opening
+        print("   📊 Calculating previous day opening prices...")
         stocks_data['Prev_Day_Open'] = stocks_data.groupby('Symbol')['Open'].shift(1)
+        
+        print("   📈 Calculating daily change percentages...")
         stocks_data['Daily_Change_Pct'] = ((stocks_data['Open'] - stocks_data['Prev_Day_Open']) / stocks_data['Prev_Day_Open']) * 100
         
-        # Also keep the intraday change for reference
+        print("   📊 Calculating intraday change percentages...")
         stocks_data['Intraday_Change_Pct'] = ((stocks_data['Close'] - stocks_data['Open']) / stocks_data['Open']) * 100
         
-        # Merge with company names
+        print("   🔗 Merging with company names...")
         stocks_data = stocks_data.merge(
             companies_data[['Symbol', 'Shortname']], 
             on='Symbol', 
             how='left'
         )
         
-        print(f"Data processing complete! {stocks_data['Symbol'].nunique()} unique stocks loaded")
+        print("\n" + "=" * 60)
+        print("🎉 DATA LOADING COMPLETE!")
+        print("=" * 60)
+        print(f"✅ Total stock records: {len(stocks_data):,}")
+        print(f"✅ Unique stocks: {stocks_data['Symbol'].nunique()}")
+        print(f"✅ Date range: {stocks_data['Date'].min().strftime('%Y-%m-%d')} to {stocks_data['Date'].max().strftime('%Y-%m-%d')}")
+        print(f"✅ Companies loaded: {len(companies_data):,}")
+        print(f"✅ Index records: {len(index_data):,}")
+        print(f"✅ Memory usage: {stocks_data.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB")
+        print("=" * 60)
+        
         return True
         
     except Exception as e:
-        print(f"ERROR loading data: {str(e)}")
+        print("\n" + "=" * 60)
+        print("❌ CRITICAL ERROR DURING DATA LOADING!")
+        print("=" * 60)
+        print(f"❌ Error type: {type(e).__name__}")
+        print(f"❌ Error message: {str(e)}")
+        print("\n📋 Full traceback:")
         import traceback
         traceback.print_exc()
+        print("=" * 60)
         return False
 
 def get_significant_declines(threshold=-20, start_date=None, end_date=None, symbol=None):
@@ -332,13 +433,34 @@ def index():
     """Main page"""
     return render_template('index.html')
 
+@app.route('/test')
+def test():
+    """Simple test endpoint"""
+    return jsonify({
+        'message': 'App is running!',
+        'timestamp': datetime.now().isoformat(),
+        'data_status': {
+            'stocks_loaded': stocks_data is not None,
+            'companies_loaded': companies_data is not None
+        }
+    })
+
 @app.route('/health')
 def health():
     """Health check endpoint for debugging"""
     global stocks_data, companies_data, index_data
     
+    import os
+    
     health_status = {
         'status': 'healthy',
+        'environment': {
+            'python_version': os.sys.version,
+            'working_directory': os.getcwd(),
+            'files_in_directory': os.listdir('.'),
+            'data_directory_exists': os.path.exists('data'),
+            'data_files': os.listdir('data') if os.path.exists('data') else []
+        },
         'data_loaded': {
             'stocks_data': stocks_data is not None,
             'companies_data': companies_data is not None,
@@ -354,12 +476,19 @@ def health():
             'start': stocks_data['Date'].min().strftime('%Y-%m-%d'),
             'end': stocks_data['Date'].max().strftime('%Y-%m-%d')
         }
+    else:
+        health_status['data_counts']['stocks_records'] = 0
+        health_status['data_counts']['unique_stocks'] = 0
     
     if companies_data is not None:
         health_status['data_counts']['companies'] = len(companies_data)
+    else:
+        health_status['data_counts']['companies'] = 0
     
     if index_data is not None:
         health_status['data_counts']['index_records'] = len(index_data)
+    else:
+        health_status['data_counts']['index_records'] = 0
     
     return jsonify(health_status)
 
