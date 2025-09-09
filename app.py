@@ -191,6 +191,7 @@ def initialize_data_on_import():
     """Initialize data when module is imported (works under gunicorn)."""
     try:
         print("🚀 Starting S&P 500 Price Dip Analysis App...")
+        print("📊 Initializing data loading process...")
         ok = load_and_process_data()
         if not ok:
             print("❌ CRITICAL ERROR: Failed to load data. App will not function properly.")
@@ -199,6 +200,8 @@ def initialize_data_on_import():
             print("✅ App started successfully with data loaded!")
     except Exception as e:
         print(f"❌ Startup error: {e}")
+        import traceback
+        traceback.print_exc()
 
 # Call initializer at import time so it runs under gunicorn
 initialize_data_on_import()
