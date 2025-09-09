@@ -11,16 +11,6 @@ stocks_data = None
 companies_data = None
 index_data = None
 
-# Load data when the app starts (for production deployment)
-print("🚀 Starting S&P 500 Price Dip Analysis App...")
-data_loaded = load_and_process_data()
-
-if not data_loaded:
-    print("❌ CRITICAL ERROR: Failed to load data. App will not function properly.")
-    print("Please check that all data files are present in the 'data/' directory.")
-else:
-    print("✅ App started successfully with data loaded!")
-
 def load_and_process_data():
     """Load and process the S&P 500 data"""
     global stocks_data, companies_data, index_data
@@ -196,6 +186,22 @@ def load_and_process_data():
         traceback.print_exc()
         print("=" * 60)
         return False
+
+def initialize_data_on_import():
+    """Initialize data when module is imported (works under gunicorn)."""
+    try:
+        print("🚀 Starting S&P 500 Price Dip Analysis App...")
+        ok = load_and_process_data()
+        if not ok:
+            print("❌ CRITICAL ERROR: Failed to load data. App will not function properly.")
+            print("Please check that all data files are present in the 'data/' directory.")
+        else:
+            print("✅ App started successfully with data loaded!")
+    except Exception as e:
+        print(f"❌ Startup error: {e}")
+
+# Call initializer at import time so it runs under gunicorn
+initialize_data_on_import()
 
 def get_significant_declines(threshold=-20, start_date=None, end_date=None, symbol=None):
     """Get stocks with significant daily declines"""
